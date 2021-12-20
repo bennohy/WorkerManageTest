@@ -2,7 +2,6 @@ package com.evermore.benno.workermanagetest
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -19,12 +18,14 @@ import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import kotlinx.coroutines.Runnable
 
 class DataTransferMonitorService : Service() {
 
     private val connectivityManager by lazy { getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager }
     private var networkRebuild = false
-    private var networkAvailable = 0
+    private var networkStable = true
+    private var networkLost = false
     private var networkChanged: Network? = null
     private val networkHandler = Handler(Looper.getMainLooper())
 
@@ -35,27 +36,27 @@ class DataTransferMonitorService : Service() {
 
     private val networkListener = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            networkAvailable = 0
+            Log.d("DataTransferMonitorService", "--------------")
             Log.d("DataTransferMonitorService", "The default network is now: $network")
             connectivityManager.getNetworkCapabilities(network)?.let { capabilities ->
 //                Timber.e("The default network Capabilities is : $capabilities")
                 val online = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 Log.d("DataTransferMonitorService", "The default network is online ? $online")
-                if (online) {
-                    networkAvailable = 0
-                    networkHandler.removeCallbacks(checkNetworkStableRunnable)
-                    networkHandler.postDelayed(checkNetworkStableRunnable, 2000)
-                }
+//                if (online) {
+//                    networkHandler.removeCallbacks(checkNetworkStableRunnable)
+//                    networkHandler.postDelayed(checkNetworkStableRunnable, 2000)
+//                }
             }
         }
 
         override fun onLost(network: Network) {
             Log.d("DataTransferMonitorService", "The default network lost last network is $network")
-            networkRebuild = true
             Handler(Looper.getMainLooper()).postDelayed({
                 val activeNetwork = connectivityManager.activeNetwork
                 Log.d("DataTransferMonitorService", "after lost network, current active is $activeNetwork")
                 if (activeNetwork == null) {
+                    networkLost = true
+                    networkChanged = null
                     WorkManager.getInstance(this@DataTransferMonitorService).cancelAllWork()
                     notifyBuild?.apply {
                         setContentTitle("Lost connection")
@@ -69,25 +70,45 @@ class DataTransferMonitorService : Service() {
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            Log.d("DataTransferMonitorService", "The default network before changed is $networkChanged")
             Log.d("DataTransferMonitorService", "The default network changed network is $network")
-            val online = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            Log.d("DataTransferMonitorService", "The default network changed network is online ? $online")
+            networkStable = false
             networkChanged?.let {
                 networkRebuild = it != network
-                networkAvailable++
-                if (online) {
-                    networkAvailable = 0
-                    networkHandler.removeCallbacks(checkNetworkStableRunnable)
-                    networkHandler.postDelayed(checkNetworkStableRunnable, 2000)
-                }
             } ?: let {
-                networkChanged = network
-                networkRebuild = false
+                networkRebuild = false || networkLost
+            }
+            networkChanged = network
+            networkLost = false
+            WorkManager.getInstance(this@DataTransferMonitorService).cancelAllWork()
+            notifyBuild?.apply {
+                setContentTitle("Lost connection")
+                setContentText("wait for network...")
+            }
+            notifyBuild?.let {
+                notifyManager.notify(notifyId, it.build())
+            }
+            if (networkRebuild) {
+                Log.d("DataTransferMonitorService", "The default network changed network Rebuild")
+                Handler(Looper.getMainLooper()).postDelayed({
+                    networkChanged?.let {
+                        connectivityManager.getNetworkCapabilities(it)?.let { capabilities ->
+                            val online = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                            Log.d("DataTransferMonitorService", "The default network changed network is online ? $online")
+                        }
+                    }
+                }, 3000)
+            } else {
+                Log.d("DataTransferMonitorService", "The default network changed network stable")
             }
         }
     }
 
-    private var checkNetworkStableRunnable = kotlinx.coroutines.Runnable {
+    private var checkNetworkStableRunnable = Runnable {
+
+    }
+
+    private var rebuildRequestRunnable = Runnable {
         if (networkRebuild) {
             Log.d("DataTransferMonitorService", "checkNetworkStableRunnable networkRebuild")
             networkRebuild = false
