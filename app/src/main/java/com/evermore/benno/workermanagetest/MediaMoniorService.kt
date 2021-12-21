@@ -16,19 +16,30 @@ class MediaMoniorService : Service() {
     private var notifyBuild: NotificationCompat.Builder? = null
     private var notifyId = 100720
 
+//    val internalImageUri = MediaStore.Images.Media.INTERNAL_CONTENT_URI
+    val externlImageUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+//    val internalObserver = MediaContentObserver(this, internalImageUri, Handler(Looper.getMainLooper()))
+    val externalObserver = MediaContentObserver(this, externlImageUri, Handler(Looper.getMainLooper()))
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("MediaMoniorService", "**onStartCommand**")
         val notify = notification("MediaObserver", "MediaAutoBackup", "AutoBackup", "Photos auto backup service is running...")
         notifyBuild = notify
         val notification = notify.build()
         startForeground(notifyId, notification)
-        val imageUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val observer = MediaContentObserver(this, Handler(Looper.getMainLooper()))
-        contentResolver.registerContentObserver(imageUri, true, observer)
+//        contentResolver.registerContentObserver(internalImageUri, Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q, internalObserver)
+        contentResolver.registerContentObserver(externlImageUri, Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q, externalObserver)
         return START_STICKY
     }
 
     override fun onBind(intent: Intent): IBinder? = null
+
+    override fun onDestroy() {
+        Log.d("MediaMoniorService", "**onDestroy**")
+//        contentResolver.unregisterContentObserver(internalObserver)
+        contentResolver.unregisterContentObserver(externalObserver)
+        super.onDestroy()
+    }
 
     private fun notification(channelId: String, channel: String, title: String, content: String): NotificationCompat.Builder {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
