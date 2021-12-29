@@ -1,2 +1,3 @@
 rootProject.name = "WorkerManageTest"
 include ':app'
+include ':tutk'
